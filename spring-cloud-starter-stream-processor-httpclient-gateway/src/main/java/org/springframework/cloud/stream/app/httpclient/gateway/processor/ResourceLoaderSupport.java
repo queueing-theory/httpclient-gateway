@@ -11,29 +11,40 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.apache.commons.io.IOUtils;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.WritableResource;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.MediaType;
-import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import org.springframework.web.util.UriComponentsBuilder;
 
-@Component
-public class ResourceLoaderSupport {
+class ResourceLoaderSupport {
 
     private ResourceLoader resourceLoader;
 
     private String location;
 
-    public ResourceLoaderSupport(ResourceLoader resourceLoader,
-            @Value("${httpclient-gateway.resourceLocationUri}") String location) {
+    ResourceLoaderSupport(ResourceLoader resourceLoader, String location) {
         Assert.isTrue(location.endsWith("/") ^ location.contains("{filename}"),
                 "resourceLocationUri should either end with '/' or has a 'filename' variable");
         this.resourceLoader = resourceLoader;
         this.location = location;
+    }
+
+    private static Map<String, Object> createUriVariables(String name) {
+        LocalDateTime localDateTime = LocalDateTime.now();
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("uuid", UUID.nameUUIDFromBytes(name.getBytes()));
+        variables.put("random_uuid", UUID.randomUUID().toString());
+        variables.put("filename", Objects.requireNonNull(name));
+        variables.put("yyyy", localDateTime.getYear());
+        variables.put("MM", String.format("%02d", localDateTime.getMonthValue()));
+        variables.put("dd", String.format("%02d", localDateTime.getDayOfMonth()));
+        variables.put("HH", String.format("%02d", localDateTime.getHour()));
+        variables.put("mm", String.format("%02d", localDateTime.getMinute()));
+        variables.put("ss", String.format("%02d", localDateTime.getSecond()));
+        return Collections.unmodifiableMap(variables);
     }
 
     public Resource externalizeAsResource(MediaType mediaType, DataBuffer dataBuffer) throws IOException {
@@ -55,7 +66,7 @@ public class ResourceLoaderSupport {
         String uriString = uriComponentsBuilder.buildAndExpand(createUriVariables(name)).toString();
         Resource resource = resourceLoader.getResource(uriString);
         if (!resource.exists() && resource.isFile()) {
-            if(!resource.getFile().getParentFile().exists()) {
+            if (!resource.getFile().getParentFile().exists()) {
                 Files.createDirectories(resource.getFile().getParentFile().toPath());
             }
         }
@@ -64,20 +75,5 @@ public class ResourceLoaderSupport {
 
     public Resource getResource(String location) {
         return resourceLoader.getResource(location);
-    }
-
-    private static Map<String, Object> createUriVariables(String name) {
-        LocalDateTime localDateTime = LocalDateTime.now();
-        Map<String, Object> variables = new HashMap<>();
-        variables.put("uuid", UUID.nameUUIDFromBytes(name.getBytes()));
-        variables.put("random_uuid", UUID.randomUUID().toString());
-        variables.put("filename", Objects.requireNonNull(name));
-        variables.put("yyyy", localDateTime.getYear());
-        variables.put("MM", String.format("%02d", localDateTime.getMonthValue()));
-        variables.put("dd", String.format("%02d", localDateTime.getDayOfMonth()));
-        variables.put("HH", String.format("%02d", localDateTime.getHour()));
-        variables.put("mm", String.format("%02d", localDateTime.getMinute()));
-        variables.put("ss", String.format("%02d", localDateTime.getSecond()));
-        return Collections.unmodifiableMap(variables);
     }
 }

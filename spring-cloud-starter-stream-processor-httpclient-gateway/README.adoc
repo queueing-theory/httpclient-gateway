@@ -21,11 +21,12 @@ A processor app that proxies requests to the URL specified.
 The **$$httpclient-gateway$$** $$processor$$ has the following options:
 
 //tag::configuration-properties[]
-$$httpclient-gateway.content-length-to-externalize$$:: $$<documentation missing>$$ *($$Long$$, default: `$$1024$$`)*
+$$httpclient-gateway.content-length-to-externalize$$:: $$Threshold values that determines when content downloaded from remote servers should be stored at resourceLocationUri.$$ *($$Long$$, default: `$$1024$$`)*
 $$httpclient-gateway.follow-redirect$$:: $$Follow Redirects$$ *($$Boolean$$, default: `$$true$$`)*
 $$httpclient-gateway.mapped-request-headers$$:: $$Http Request Headers that will be mapped.$$ *($$String[]$$, default: `$$<none>$$`)*
 $$httpclient-gateway.mapped-response-headers$$:: $$Http Response Headers that will be mapped.$$ *($$String[]$$, default: `$$<none>$$`)*
 $$httpclient-gateway.request-per-second$$:: $$Delay before HTTP requests are actually sent. Works as preemptive rate limit.$$ *($$Integer$$, default: `$$1$$`)*
+$$httpclient-gateway.resource-location-uri$$:: $$Base URI where externalized contents will be stored.$$ *($$String$$, default: `$$file:///tmp$$`)*
 $$httpclient-gateway.retry-error-status-codes$$:: $$HTTP Status Codes to retry$$ *($$Integer[]$$, default: `$$[429]$$`)*
 $$httpclient-gateway.url$$:: $$The URL to issue an http request to, as a static value.$$ *($$String$$, default: `$$<none>$$`)*
 $$httpclient-gateway.url-expression$$:: $$A SpEL expression against incoming message to determine the URL to use.$$ *($$Expression$$, default: `$$<none>$$`)*

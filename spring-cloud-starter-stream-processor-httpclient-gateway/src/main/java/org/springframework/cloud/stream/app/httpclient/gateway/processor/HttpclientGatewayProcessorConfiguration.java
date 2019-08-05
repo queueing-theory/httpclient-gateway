@@ -40,6 +40,7 @@ import org.springframework.cloud.stream.messaging.Processor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpEntity;
@@ -103,13 +104,14 @@ public class HttpclientGatewayProcessorConfiguration {
     private HttpclientGatewayProcessorProperties properties;
 
     @Autowired
-    private ResourceLoaderSupport resourceLoaderSupport;
+    private ResourceLoader resourceLoader;
 
     @Autowired
     private ObjectMapper objectMapper;
 
     @Bean
-    IntegrationFlow httpClientFlow(HttpclientGatewayProcessor processor, DefaultHttpHeaderMapper headerMapper) {
+    IntegrationFlow httpClientFlow(HttpclientGatewayProcessor processor,
+            DefaultHttpHeaderMapper headerMapper, ResourceLoaderSupport resourceLoaderSupport) {
 
         return IntegrationFlows.from(processor.input())
                 .enrichHeaders(f1 -> f1.headerFunction(HTTP_REQUEST_URL_HEADER, m -> {
@@ -127,7 +129,7 @@ public class HttpclientGatewayProcessorConfiguration {
                 .route(Message.class, m -> {
                     String originalContentType = m.getHeaders().get(ORIGINAL_CONTENT_TYPE, String.class);
                     return originalContentType != null && originalContentType.matches("^multipart/form-data.*$");
-                }, r -> r.subFlowMapping(true, sf -> sf.gateway(multiPartBody()))
+                }, r -> r.subFlowMapping(true, sf -> sf.gateway(multiPartBody(resourceLoaderSupport())))
                         .subFlowMapping(false, sf -> sf.gateway(body())))
                 .log(Level.INFO, m -> m)
                 .headerFilter("host")
@@ -169,56 +171,53 @@ public class HttpclientGatewayProcessorConfiguration {
                 .channel(processor.output()).get();
     }
 
-    @Bean
-    public IntegrationFlow body() {
+    private IntegrationFlow body() {
         return f -> f.enrichHeaders(h -> h.headerFunction(MessageHeaders.CONTENT_TYPE, m -> {
             MimeType mimeType = m.getHeaders().get(MessageHeaders.CONTENT_TYPE, MimeType.class);
             return mimeType.toString();
         }, true));
     }
 
-    @Bean
-    public IntegrationFlow multiPartBody() {
+    private IntegrationFlow multiPartBody(ResourceLoaderSupport resourceLoaderSupport) {
         return f -> f.convert(JsonNode.class)
                 .<ArrayNode, HttpEntity<?>>transform(p -> {
-            HttpHeaders httpHeaders = new HttpHeaders();
-            httpHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
-            MultiValueMap<String, Object> multipartRequest = new LinkedMultiValueMap<>();
-            p.forEach(jsonNode -> {
-                HttpHeaders nestedHeaders = new HttpHeaders();
-                String contentType = jsonNode.path("contentType").asText();
-                if (!contentType.isEmpty()) {
-                    String originalFileName = jsonNode.path("originalFileName").asText();
-                    String formParameterName = jsonNode.path("formParameterName").asText();
-                    String uri = jsonNode.path("uri").asText();
-                    ContentDisposition contentDisposition = ContentDisposition
-                            .builder("form-data")
-                            .name(formParameterName).filename(originalFileName).build();
-                    nestedHeaders.setContentDisposition(contentDisposition);
-                    nestedHeaders.setContentType(MediaType.parseMediaType(contentType));
-                    Resource resource = resourceLoaderSupport.getResource(uri);
-                    HttpEntity<Resource> fileEntity = new HttpEntity<>(resource, nestedHeaders);
-                    multipartRequest.add(formParameterName, fileEntity);
-                } else {
-                    String name = jsonNode.fieldNames().next();
-                    JsonNode value = jsonNode.get(name);
-                    if (value.isObject() || value.isArray()) {
-                        nestedHeaders.setContentType(MediaType.APPLICATION_JSON);
-                        multipartRequest.add(name, new HttpEntity<>(value, nestedHeaders));
-                    } else {
-                        nestedHeaders.setContentType(MediaType.TEXT_PLAIN);
-                        multipartRequest
-                                .add(name, new HttpEntity<>(value.asText(), nestedHeaders));
-                    }
-                }
-            });
-            return new HttpEntity<>(multipartRequest, httpHeaders);
-        }).enrichHeaders(
-                h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA, true));
+                    HttpHeaders httpHeaders = new HttpHeaders();
+                    httpHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
+                    MultiValueMap<String, Object> multipartRequest = new LinkedMultiValueMap<>();
+                    p.forEach(jsonNode -> {
+                        HttpHeaders nestedHeaders = new HttpHeaders();
+                        String contentType = jsonNode.path("contentType").asText();
+                        if (!contentType.isEmpty()) {
+                            String originalFileName = jsonNode.path("originalFileName").asText();
+                            String formParameterName = jsonNode.path("formParameterName").asText();
+                            String uri = jsonNode.path("uri").asText();
+                            ContentDisposition contentDisposition = ContentDisposition
+                                    .builder("form-data")
+                                    .name(formParameterName).filename(originalFileName).build();
+                            nestedHeaders.setContentDisposition(contentDisposition);
+                            nestedHeaders.setContentType(MediaType.parseMediaType(contentType));
+                            Resource resource = resourceLoaderSupport.getResource(uri);
+                            HttpEntity<Resource> fileEntity = new HttpEntity<>(resource, nestedHeaders);
+                            multipartRequest.add(formParameterName, fileEntity);
+                        } else {
+                            String name = jsonNode.fieldNames().next();
+                            JsonNode value = jsonNode.get(name);
+                            if (value.isObject() || value.isArray()) {
+                                nestedHeaders.setContentType(MediaType.APPLICATION_JSON);
+                                multipartRequest.add(name, new HttpEntity<>(value, nestedHeaders));
+                            } else {
+                                nestedHeaders.setContentType(MediaType.TEXT_PLAIN);
+                                multipartRequest
+                                        .add(name, new HttpEntity<>(value.asText(), nestedHeaders));
+                            }
+                        }
+                    });
+                    return new HttpEntity<>(multipartRequest, httpHeaders);
+                }).enrichHeaders(
+                        h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA, true));
     }
 
-    @Bean
-    public IntegrationFlow resourceExternalized() {
+    private IntegrationFlow resourceExternalized() {
         return f -> f.enrichHeaders(h -> h.header("is_reference", true))
                 .<Resource>handle(throwsException((p, h) -> {
                     String requestUrl = h.get(HTTP_REQUEST_URL_HEADER, String.class);
@@ -231,13 +230,17 @@ public class HttpclientGatewayProcessorConfiguration {
                         h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_UTF8, true));
     }
 
-    @Bean
-    public RateLimiterRequestHandlerAdvice rateLimiterRequestHandlerAdvice() {
+    private RateLimiterRequestHandlerAdvice rateLimiterRequestHandlerAdvice() {
         return new RateLimiterRequestHandlerAdvice(RateLimiterConfig.custom()
                 .timeoutDuration(Duration.ofSeconds(properties.getRequestPerSecond()))
                 .limitRefreshPeriod(ONE_SECOND)
                 .limitForPeriod(properties.getRequestPerSecond())
                 .build());
+    }
+
+    @Bean
+    public ResourceLoaderSupport resourceLoaderSupport() {
+        return new ResourceLoaderSupport(resourceLoader, properties.getResourceLocationUri());
     }
 
     @Bean

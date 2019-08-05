@@ -73,6 +73,14 @@ public class HttpclientGatewayProcessorProperties {
      */
     private boolean followRedirect = true;
 
+    /**
+     * Base URI where externalized contents will be stored.
+     */
+    private String resourceLocationUri = "file:///tmp";
+
+    /**
+     * Threshold values that determines when content downloaded from remote servers should be stored at resourceLocationUri.
+     */
     private long contentLengthToExternalize = 1024;
 
     public String getUrl() {
@@ -151,5 +159,13 @@ public class HttpclientGatewayProcessorProperties {
 
     public void setContentLengthToExternalize(long contentLengthToExternalize) {
         this.contentLengthToExternalize = contentLengthToExternalize;
+    }
+
+    public String getResourceLocationUri() {
+        return resourceLocationUri;
+    }
+
+    public void setResourceLocationUri(String resourceLocationUri) {
+        this.resourceLocationUri = resourceLocationUri;
     }
 }
