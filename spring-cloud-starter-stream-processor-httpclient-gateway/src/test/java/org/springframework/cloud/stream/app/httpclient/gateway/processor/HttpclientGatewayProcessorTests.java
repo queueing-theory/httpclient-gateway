@@ -24,6 +24,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
+import org.springframework.util.MimeType;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -91,7 +92,7 @@ public abstract class HttpclientGatewayProcessorTests {
         @Test
         public void testMultiPart() throws Exception {
             Map<String, Object> map = new HashMap<>();
-            map.put(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
+            map.put(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
             map.put("http_requestMethod", "POST");
             map.put("original_content_type", "multipart/form-data");
             map.put("http_requestUrl", "http://some.domain/post");

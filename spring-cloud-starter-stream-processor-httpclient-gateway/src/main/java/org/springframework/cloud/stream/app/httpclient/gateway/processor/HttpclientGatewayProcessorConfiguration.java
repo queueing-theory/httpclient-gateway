@@ -155,11 +155,13 @@ public class HttpclientGatewayProcessorConfiguration {
                                     };
                                 })
                         , c -> c.advice(rateLimiterRequestHandlerAdvice()))
+                .log(Level.INFO, m -> m)
                 .<Object, Class<?>>route(object -> object instanceof Resource ? Resource.class : object.getClass(),
                         r -> r.subFlowMapping(Resource.class, sf -> sf.gateway(resourceExternalized()))
-                                .subFlowMapping(byte[].class,
-                                        sf -> sf.handle((p, h) -> p))
-                )
+                                .subFlowMapping(byte[].class, f -> f.enrichHeaders(h -> h.headerFunction(MessageHeaders.CONTENT_TYPE, m -> {
+                                    MimeType mimeType = m.getHeaders().get(MessageHeaders.CONTENT_TYPE, MimeType.class);
+                                    return mimeType.toString();
+                                }, true))))
                 .log(Level.INFO, m -> m)
                 .channel(processor.output()).get();
     }
@@ -231,7 +233,7 @@ public class HttpclientGatewayProcessorConfiguration {
                     objectNode.put("uri", p.getURI().toString());
                     return objectNode;
                 })).enrichHeaders(
-                        h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_UTF8, true));
+                        h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON, true));
     }
 
     private RateLimiterRequestHandlerAdvice rateLimiterRequestHandlerAdvice() {
