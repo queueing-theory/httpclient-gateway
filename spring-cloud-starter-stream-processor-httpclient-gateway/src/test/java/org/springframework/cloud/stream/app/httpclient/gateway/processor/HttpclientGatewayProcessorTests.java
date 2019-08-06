@@ -1,16 +1,7 @@
 package org.springframework.cloud.stream.app.httpclient.gateway.processor;
 
-import static com.jayway.jsonpath.matchers.JsonPathMatchers.hasJsonPath;
-import static org.hamcrest.core.AllOf.allOf;
-import static org.hamcrest.core.Is.is;
-import static org.junit.Assert.assertThat;
-import static org.springframework.cloud.stream.test.matcher.MessageQueueMatcher.receivesPayloadThat;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.net.URI;
-import java.util.HashMap;
-import java.util.Map;
 import org.gaul.httpbin.HttpBin;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -34,6 +25,16 @@ import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
 
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+
+import static com.jayway.jsonpath.matchers.JsonPathMatchers.hasJsonPath;
+import static org.hamcrest.core.AllOf.allOf;
+import static org.hamcrest.core.Is.is;
+import static org.junit.Assert.assertThat;
+import static org.springframework.cloud.stream.test.matcher.MessageQueueMatcher.receivesPayloadThat;
+
 @RunWith(SpringRunner.class)
 @ContextConfiguration(initializers = HttpclientGatewayProcessorTests.Initializer.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -52,7 +53,7 @@ public abstract class HttpclientGatewayProcessorTests {
     protected MessageCollector messageCollector;
 
     @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
-            "httpclient-gateway.resourceLocationUri=file://tmp/",
+            "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
             "httpclient-gateway.contentLengthToExternalize=1000000"})
     public static class DefaultHttpclientGatewayProcessorTests extends HttpclientGatewayProcessorTests {
 
@@ -88,21 +89,6 @@ public abstract class HttpclientGatewayProcessorTests {
         }
 
         @Test
-        public void testLargeResponseBodyExternalized() throws Exception {
-            Map<String, Object> map = new HashMap<>();
-            map.put("http_requestMethod", "POST");
-            map.put("http_requestUrl", "http://some.domain/post");
-            MessageHeaders messageHeaders = new MessageHeaders(map);
-            Message message = MessageBuilder.createMessage(LARGE_BYTE_ARRAY, messageHeaders);
-            channels.input().send(message);
-            assertThat(messageCollector.forChannel(channels.output()),
-                    receivesPayloadThat(allOf(
-                            hasJsonPath("$.http_requestUrl"),
-                            hasJsonPath("$.original_content_type", is("application/json"))
-                    )));
-        }
-
-        @Test
         public void testMultiPart() throws Exception {
             Map<String, Object> map = new HashMap<>();
             map.put(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
@@ -128,6 +114,44 @@ public abstract class HttpclientGatewayProcessorTests {
         }
 
     }
+
+
+    @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
+            "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
+            "httpclient-gateway.contentLengthToExternalize=1000000", "httpclient-gateway.urlPatternsToExternalize=/post"
+    })
+    public static class HttpclientGatewayProcessorExternalizingTests extends HttpclientGatewayProcessorTests {
+        @Test
+        public void testLargeResponseBodyExternalized() throws Exception {
+            Map<String, Object> map = new HashMap<>();
+            map.put("http_requestMethod", "POST");
+            map.put("http_requestUrl", "http://some.domain/post");
+            MessageHeaders messageHeaders = new MessageHeaders(map);
+            Message message = MessageBuilder.createMessage(LARGE_BYTE_ARRAY, messageHeaders);
+            channels.input().send(message);
+            assertThat(messageCollector.forChannel(channels.output()),
+                    receivesPayloadThat(allOf(
+                            hasJsonPath("$.http_requestUrl"),
+                            hasJsonPath("$.original_content_type", is("application/json"))
+                    )));
+        }
+
+        @Test
+        public void testResponseBodyExternalizedWhenURLPathMatches() throws Exception {
+            Map<String, Object> map = new HashMap<>();
+            map.put("http_requestMethod", "POST");
+            map.put("http_requestUrl", "http://some.domain/post");
+            MessageHeaders messageHeaders = new MessageHeaders(map);
+            Message message = MessageBuilder.createMessage(EMPTY_BYTE_ARRAY, messageHeaders);
+            channels.input().send(message);
+            assertThat(messageCollector.forChannel(channels.output()),
+                    receivesPayloadThat(
+                            allOf(hasJsonPath("$.http_requestUrl"), hasJsonPath("$.original_content_type", is("application/json")),
+                                    hasJsonPath("$.uri", is("file://tmp/127.0.0.1/post/310140d2-8b58-32c2-b45f-01e5e14141d8.json")))));
+
+        }
+    }
+
 
     static class Initializer implements ApplicationContextInitializer<ConfigurableApplicationContext>,
             ApplicationListener<ContextClosedEvent> {

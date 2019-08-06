@@ -48,6 +48,11 @@
             <version>${resilience4j.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>1.21</version>
+        </dependency>
+        <dependency>
             <groupId>org.gaul</groupId>
             <artifactId>httpbin</artifactId>
             <version>1.2.0</version>

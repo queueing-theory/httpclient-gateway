@@ -79,6 +79,11 @@ public class HttpclientGatewayProcessorProperties {
     private String resourceLocationUri = "file:///tmp";
 
     /**
+     * URL patterns to determine whether content downloaded from remote servers should be stored at resourceLocationUri
+     */
+    private String[] urlPatternsToExternalize;
+
+    /**
      * Threshold values that determines when content downloaded from remote servers should be stored at resourceLocationUri.
      */
     private long contentLengthToExternalize = 1024;
@@ -167,5 +172,13 @@ public class HttpclientGatewayProcessorProperties {
 
     public void setResourceLocationUri(String resourceLocationUri) {
         this.resourceLocationUri = resourceLocationUri;
+    }
+
+    public String[] getUrlPatternsToExternalize() {
+        return urlPatternsToExternalize;
+    }
+
+    public void setUrlPatternsToExternalize(String[] urlPatternsToExternalize) {
+        this.urlPatternsToExternalize = urlPatternsToExternalize;
     }
 }
