@@ -35,6 +35,7 @@ import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.*;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.integration.dsl.IntegrationFlow;
+import org.springframework.integration.dsl.IntegrationFlowDefinition;
 import org.springframework.integration.dsl.IntegrationFlows;
 import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.handler.advice.RateLimiterRequestHandlerAdvice;
@@ -96,9 +97,11 @@ public class HttpclientGatewayProcessorConfiguration {
     private ObjectMapper objectMapper;
     private PathMatcher pathMatcher = new AntPathMatcher();
 
+    private IntegrationFlow passThrough = IntegrationFlowDefinition::bridge;
+
+
     @Bean
-    IntegrationFlow httpClientFlow(HttpclientGatewayProcessor processor,
-                                   DefaultHttpHeaderMapper headerMapper, ResourceLoaderSupport resourceLoaderSupport) {
+    IntegrationFlow httpClientFlow(HttpclientGatewayProcessor processor) {
 
         return IntegrationFlows.from(processor.input())
                 .enrichHeaders(f1 -> f1.headerFunction(HTTP_REQUEST_URL_HEADER, m -> {
@@ -127,7 +130,7 @@ public class HttpclientGatewayProcessorConfiguration {
                                 )
                         ).build())
                                 .httpMethodFunction(m -> m.getHeaders().get(HTTP_REQUEST_METHOD_HEADER))
-                                .headerMapper(headerMapper)
+                                .headerMapper(defaultHttpHeaderMapper())
                                 .bodyExtractorFunction(message -> {
                                     String httpRequestUrl = message.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class);
 
@@ -141,7 +144,7 @@ public class HttpclientGatewayProcessorConfiguration {
                                                     if (matchesUrlPatterns(uri.getPath()) ||
                                                             contentLength > properties.getContentLengthToExternalize()) {
                                                         MediaType mediaType = httpHeaders.getContentType();
-                                                        Resource resource = resourceLoaderSupport
+                                                        Resource resource = resourceLoaderSupport()
                                                                 .externalizeAsResource(uri.getHost() + uri.getPath(), mediaType, buffer);
                                                         DataBufferUtils.release(buffer);
                                                         return resource;
@@ -156,12 +159,9 @@ public class HttpclientGatewayProcessorConfiguration {
                                 })
                         , c -> c.advice(rateLimiterRequestHandlerAdvice()))
                 .log(Level.INFO, m -> m)
-                .<Object, Class<?>>route(object -> object instanceof Resource ? Resource.class : object.getClass(),
-                        r -> r.subFlowMapping(Resource.class, sf -> sf.gateway(resourceExternalized()))
-                                .subFlowMapping(byte[].class, f -> f.enrichHeaders(h -> h.headerFunction(MessageHeaders.CONTENT_TYPE, m -> {
-                                    MimeType mimeType = m.getHeaders().get(MessageHeaders.CONTENT_TYPE, MimeType.class);
-                                    return mimeType.toString();
-                                }, true))))
+                .<Object, Boolean>route(object -> object instanceof Resource,
+                        r -> r.subFlowMapping(true, sf -> sf.gateway(resourceExternalized()))
+                                .subFlowMapping(false, passThrough))
                 .log(Level.INFO, m -> m)
                 .channel(processor.output()).get();
     }

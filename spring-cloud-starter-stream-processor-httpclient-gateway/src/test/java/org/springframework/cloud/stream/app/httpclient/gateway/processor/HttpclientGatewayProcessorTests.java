@@ -119,23 +119,9 @@ public abstract class HttpclientGatewayProcessorTests {
 
     @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
             "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
-            "httpclient-gateway.contentLengthToExternalize=1000000", "httpclient-gateway.urlPatternsToExternalize=/post"
+            "httpclient-gateway.urlPatternsToExternalize=/post"
     })
-    public static class HttpclientGatewayProcessorExternalizingTests extends HttpclientGatewayProcessorTests {
-        @Test
-        public void testLargeResponseBodyExternalized() throws Exception {
-            Map<String, Object> map = new HashMap<>();
-            map.put("http_requestMethod", "POST");
-            map.put("http_requestUrl", "http://some.domain/post");
-            MessageHeaders messageHeaders = new MessageHeaders(map);
-            Message message = MessageBuilder.createMessage(LARGE_BYTE_ARRAY, messageHeaders);
-            channels.input().send(message);
-            assertThat(messageCollector.forChannel(channels.output()),
-                    receivesPayloadThat(allOf(
-                            hasJsonPath("$.http_requestUrl"),
-                            hasJsonPath("$.original_content_type", is("application/json"))
-                    )));
-        }
+    public static class HttpclientGatewayProcessorExternalizingTest1 extends HttpclientGatewayProcessorTests {
 
         @Test
         public void testResponseBodyExternalizedWhenURLPathMatches() throws Exception {
@@ -150,6 +136,27 @@ public abstract class HttpclientGatewayProcessorTests {
                             allOf(hasJsonPath("$.http_requestUrl"), hasJsonPath("$.original_content_type", is("application/json")),
                                     hasJsonPath("$.uri", is("file://tmp/127.0.0.1/post/310140d2-8b58-32c2-b45f-01e5e14141d8.json")))));
 
+        }
+    }
+
+    @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
+            "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
+            "httpclient-gateway.contentLengthToExternalize=1000000"
+    })
+    public static class HttpclientGatewayProcessorExternalizingTest2 extends HttpclientGatewayProcessorTests {
+        @Test
+        public void testLargeResponseBodyExternalized() throws Exception {
+            Map<String, Object> map = new HashMap<>();
+            map.put("http_requestMethod", "POST");
+            map.put("http_requestUrl", "http://some.domain/post");
+            MessageHeaders messageHeaders = new MessageHeaders(map);
+            Message message = MessageBuilder.createMessage(LARGE_BYTE_ARRAY, messageHeaders);
+            channels.input().send(message);
+            assertThat(messageCollector.forChannel(channels.output()),
+                    receivesPayloadThat(allOf(
+                            hasJsonPath("$.http_requestUrl"),
+                            hasJsonPath("$.original_content_type", is("application/json"))
+                    )));
         }
     }
 
