@@ -47,25 +47,35 @@ class ResourceLoaderSupport {
         return Collections.unmodifiableMap(variables);
     }
 
-    public Resource externalizeAsResource(String name, MediaType mediaType, DataBuffer dataBuffer) throws IOException, MimeTypeException {
-        String extension = mimeTypes.forName(mediaType.toString()).getExtension();
+    public String externalizeAsResource(String name, MediaType mediaType, DataBuffer dataBuffer) throws IOException {
+        String extension = null;
+        try {
+            extension = mimeTypes.forName(mediaType.toString()).getExtension();
+        } catch (MimeTypeException e) {
+            e.printStackTrace();
+        }
         String key = name + "/" + UUID.nameUUIDFromBytes(name.getBytes()).toString();
-        Resource resource = createResource(key, extension);
+
+        String uriPath = uriPath(key, extension);
+        Resource resource = createResource(uriPath);
         WritableResource writableResource = (WritableResource) resource;
         try (OutputStream outputStream = writableResource.getOutputStream();
              InputStream inputStream = dataBuffer.asInputStream()) {
             IOUtils.copy(inputStream, outputStream);
         }
-        return resource;
+        return uriPath;
     }
 
-    public Resource createResource(String name, String extension) throws IOException {
+    private String uriPath(String name, String extension) {
         UriComponentsBuilder uriComponentsBuilder = UriComponentsBuilder.fromUriString(location);
         if (location.endsWith("/")) {
             uriComponentsBuilder.path(name + extension);
         }
-        String uriString = uriComponentsBuilder.buildAndExpand(createUriVariables(name, extension)).toString();
-        Resource resource = resourceLoader.getResource(uriString);
+        return uriComponentsBuilder.buildAndExpand(createUriVariables(name, extension)).toString();
+    }
+
+    public Resource createResource(String uriPath) throws IOException {
+        Resource resource = resourceLoader.getResource(uriPath);
         if (!resource.exists() && resource.isFile()) {
             if (!resource.getFile().getParentFile().exists()) {
                 Files.createDirectories(resource.getFile().getParentFile().toPath());

@@ -21,6 +21,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cloud.stream.annotation.EnableBinding;
@@ -32,15 +34,20 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.io.buffer.DataBufferUtils;
-import org.springframework.http.*;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ClientHttpResponse;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.dsl.IntegrationFlowDefinition;
 import org.springframework.integration.dsl.IntegrationFlows;
 import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.handler.advice.RateLimiterRequestHandlerAdvice;
 import org.springframework.integration.http.support.DefaultHttpHeaderMapper;
-import org.springframework.integration.webflux.dsl.EnhancedWebFlux;
+import org.springframework.integration.webflux.dsl.WebFlux;
+import org.springframework.integration.webflux.support.ClientHttpResponseBodyExtractor;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandlingException;
@@ -52,11 +59,11 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import org.springframework.web.util.UriComponentsBuilder;
 import reactor.netty.http.client.HttpClient;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
-
-import static org.springframework.cloud.stream.app.httpclient.gateway.processor.LambdaExceptionHandler.throwsException;
+import java.util.stream.Collectors;
 
 /**
  * A processor app that makes requests to an HTTP resource and emits the response body as a message payload. This
@@ -74,6 +81,7 @@ import static org.springframework.cloud.stream.app.httpclient.gateway.processor.
 @EnableConfigurationProperties(HttpclientGatewayProcessorProperties.class)
 @ComponentScan
 public class HttpclientGatewayProcessorConfiguration {
+    private final Log logger = LogFactory.getLog(getClass());
 
     private static final String HTTP_REQUEST_URL_HEADER = "http_requestUrl";
 
@@ -95,10 +103,8 @@ public class HttpclientGatewayProcessorConfiguration {
     private ResourceLoader resourceLoader;
     @Autowired
     private ObjectMapper objectMapper;
-    private PathMatcher pathMatcher = new AntPathMatcher();
-
-    private IntegrationFlow passThrough = IntegrationFlowDefinition::bridge;
-
+    @Autowired
+    private PathMatcher pathMatcher;
 
     @Bean
     IntegrationFlow httpClientFlow(HttpclientGatewayProcessor processor) {
@@ -123,7 +129,7 @@ public class HttpclientGatewayProcessorConfiguration {
                         .subFlowMapping(false, sf -> sf.gateway(body())))
                 .log(Level.INFO, m -> m)
                 .headerFilter("host")
-                .handle(EnhancedWebFlux.outboundGateway(m -> m.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class),
+                .handle(WebFlux.outboundGateway(m -> m.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class),
                         WebClient.builder().clientConnector(new ReactorClientHttpConnector(
                                         HttpClient.create().followRedirect(properties.isFollowRedirect())
                                                 .wiretap(properties.isWireTap())
@@ -131,39 +137,54 @@ public class HttpclientGatewayProcessorConfiguration {
                         ).build())
                                 .httpMethodFunction(m -> m.getHeaders().get(HTTP_REQUEST_METHOD_HEADER))
                                 .headerMapper(defaultHttpHeaderMapper())
-                                .bodyExtractorFunction(message -> {
-                                    String httpRequestUrl = message.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class);
-
-                                    return (inputMessage, context) -> {
-                                        HttpHeaders httpHeaders = inputMessage.getHeaders();
-                                        long contentLength = httpHeaders.getContentLength();
-                                        Assert.notNull(contentLength, "Content-Length must not be null");
-                                        return DataBufferUtils.join(inputMessage.getBody())
-                                                .map(throwsException(buffer -> {
-                                                    URI uri = URI.create(httpRequestUrl);
-                                                    if (matchesUrlPatterns(uri.getPath()) ||
-                                                            contentLength > properties.getContentLengthToExternalize()) {
-                                                        MediaType mediaType = httpHeaders.getContentType();
-                                                        Resource resource = resourceLoaderSupport()
-                                                                .externalizeAsResource(uri.getHost() + uri.getPath(), mediaType, buffer);
-                                                        DataBufferUtils.release(buffer);
-                                                        return resource;
-                                                    } else {
-                                                        byte[] bytes = new byte[buffer.readableByteCount()];
-                                                        buffer.read(bytes);
-                                                        DataBufferUtils.release(buffer);
-                                                        return bytes;
-                                                    }
-                                                }));
-                                    };
-                                })
+                                .bodyExtractor(new ClientHttpResponseBodyExtractor())
                         , c -> c.advice(rateLimiterRequestHandlerAdvice()))
                 .log(Level.INFO, m -> m)
-                .<Object, Boolean>route(object -> object instanceof Resource,
-                        r -> r.subFlowMapping(true, sf -> sf.gateway(resourceExternalized()))
-                                .subFlowMapping(false, passThrough))
-                .log(Level.INFO, m -> m)
-                .channel(processor.output()).get();
+                .handle(m -> {
+                    MessageHeaders messageHeaders = m.getHeaders();
+                    ClientHttpResponse clientHttpResponse = (ClientHttpResponse) m.getPayload();
+                    HttpHeaders httpHeaders = clientHttpResponse.getHeaders();
+                    long contentLength = httpHeaders.getContentLength();
+                    Assert.notNull(contentLength, "Content-Length must not be null");
+                    DataBufferUtils.join(clientHttpResponse.getBody())
+                            .subscribe(buffer -> {
+                                URI uri = URI.create(messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class));
+
+                                if (matchesUrlPatterns(uri.getPath()) ||
+                                        contentLength > properties.getContentLengthToExternalize()) {
+                                    MediaType mediaType = httpHeaders.getContentType();
+                                    String uriPath = null;
+                                    try {
+                                        uriPath = resourceLoaderSupport()
+                                                .externalizeAsResource(uri.getHost() + uri.getPath(), mediaType, buffer);
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
+                                    DataBufferUtils.release(buffer);
+
+                                    String requestUrl = messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class);
+                                    ObjectNode objectNode = objectMapper.createObjectNode();
+                                    objectNode.put(HTTP_REQUEST_URL_HEADER, requestUrl);
+                                    objectNode.put(ORIGINAL_CONTENT_TYPE, messageHeaders.get(MessageHeaders.CONTENT_TYPE).toString());
+                                    objectNode.put("uri", uriPath);
+                                    Map<String, Object> headersToCopy = messageHeaders.entrySet().stream().filter(headerName -> !headerName.equals(MessageHeaders.CONTENT_TYPE))
+                                            .collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()));
+                                    headersToCopy.put(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
+                                    headersToCopy.put("is_reference", true);
+                                    MessageBuilder.withPayload(objectNode).copyHeaders(headersToCopy).build();
+                                    Message<? extends JsonNode> message = MessageBuilder.withPayload(objectNode).copyHeaders(headersToCopy).build();
+                                    logger.info(message.toString());
+                                    processor.output().send(message);
+                                } else {
+                                    byte[] bytes = new byte[buffer.readableByteCount()];
+                                    buffer.read(bytes);
+                                    DataBufferUtils.release(buffer);
+                                    Message<byte[]> message = MessageBuilder.withPayload(bytes).copyHeaders(messageHeaders).build();
+                                    logger.info(message.toString());
+                                    processor.output().send(message);
+                                }
+                            });
+                }).get();
     }
 
     private boolean matchesUrlPatterns(String httpRequestUrl) {
@@ -221,19 +242,6 @@ public class HttpclientGatewayProcessorConfiguration {
                     return new HttpEntity<>(multipartRequest, httpHeaders);
                 }).enrichHeaders(
                         h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA, true));
-    }
-
-    private IntegrationFlow resourceExternalized() {
-        return f -> f.enrichHeaders(h -> h.header("is_reference", true))
-                .<Resource>handle(throwsException((p, h) -> {
-                    String requestUrl = h.get(HTTP_REQUEST_URL_HEADER, String.class);
-                    ObjectNode objectNode = objectMapper.createObjectNode();
-                    objectNode.put(HTTP_REQUEST_URL_HEADER, requestUrl);
-                    objectNode.put(ORIGINAL_CONTENT_TYPE, h.get(MessageHeaders.CONTENT_TYPE).toString());
-                    objectNode.put("uri", p.getURI().toString());
-                    return objectNode;
-                })).enrichHeaders(
-                        h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON, true));
     }
 
     private RateLimiterRequestHandlerAdvice rateLimiterRequestHandlerAdvice() {
