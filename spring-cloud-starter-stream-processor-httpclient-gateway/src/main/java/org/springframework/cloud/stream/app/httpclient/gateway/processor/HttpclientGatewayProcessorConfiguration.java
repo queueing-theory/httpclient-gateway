@@ -38,12 +38,12 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ClientHttpResponse;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.handler.advice.RateLimiterRequestHandlerAdvice;
 import org.springframework.integration.http.support.DefaultHttpHeaderMapper;
 import org.springframework.integration.webflux.dsl.WebFlux;
@@ -53,7 +53,12 @@ import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandlingException;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.util.*;
+import org.springframework.util.Assert;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MimeType;
+import org.springframework.util.MultiValueMap;
+import org.springframework.util.PathMatcher;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -62,7 +67,16 @@ import reactor.netty.http.client.HttpClient;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
@@ -81,22 +95,15 @@ import java.util.stream.Collectors;
 @EnableConfigurationProperties(HttpclientGatewayProcessorProperties.class)
 @ComponentScan
 public class HttpclientGatewayProcessorConfiguration {
-    private final Log logger = LogFactory.getLog(getClass());
-
     private static final String HTTP_REQUEST_URL_HEADER = "http_requestUrl";
-
     private static final String HTTP_REQUEST_METHOD_HEADER = "http_requestMethod";
-
     private static final String HTTP_STATUS_CODE_HEADER = "http_statusCode";
-
-    private static final String HTTP_STATUS_TEXT_HEADER = "http_statusText";
-
     private static final String CONTINUATION_ID_HEADER = "continuation_id";
-
     private static final String ORIGINAL_CONTENT_TYPE = "original_content_type";
-
+    private static final String ANALYTICS_FLOW_INPUT = "analyticsFlow.input";
     private static final Duration ONE_SECOND = Duration.ofSeconds(1);
-
+    private static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
+    private final Log logger = LogFactory.getLog(getClass());
     @Autowired
     private HttpclientGatewayProcessorProperties properties;
     @Autowired
@@ -127,20 +134,17 @@ public class HttpclientGatewayProcessorConfiguration {
                     return originalContentType != null && originalContentType.matches("^multipart/form-data.*$");
                 }, r -> r.subFlowMapping(true, sf -> sf.gateway(multiPartBody(resourceLoaderSupport())))
                         .subFlowMapping(false, sf -> sf.gateway(body())))
-                .log(Level.INFO, m -> m)
                 .headerFilter("host")
                 .handle(WebFlux.outboundGateway(m -> m.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class),
                         WebClient.builder().clientConnector(new ReactorClientHttpConnector(
                                         HttpClient.create().followRedirect(properties.isFollowRedirect())
                                                 .wiretap(properties.isWireTap())
                                 )
-                        ).build())
-                                .httpMethodFunction(m -> m.getHeaders().get(HTTP_REQUEST_METHOD_HEADER))
+                        ).build()).httpMethodFunction(m -> m.getHeaders().get(HTTP_REQUEST_METHOD_HEADER))
                                 .headerMapper(defaultHttpHeaderMapper())
                                 .bodyExtractor(new ClientHttpResponseBodyExtractor())
                         , c -> c.advice(rateLimiterRequestHandlerAdvice()))
-                .log(Level.INFO, m -> m)
-                .handle(m -> {
+                .publishSubscribeChannel(executorService(), s -> s.subscribe(responseFlow -> responseFlow.handle(m -> {
                     MessageHeaders messageHeaders = m.getHeaders();
                     ClientHttpResponse clientHttpResponse = (ClientHttpResponse) m.getPayload();
                     HttpHeaders httpHeaders = clientHttpResponse.getHeaders();
@@ -184,7 +188,35 @@ public class HttpclientGatewayProcessorConfiguration {
                                     processor.output().send(message);
                                 }
                             });
-                }).get();
+                })).subscribe(analyticsFlow -> analyticsFlow.channel(ANALYTICS_FLOW_INPUT))).get();
+    }
+
+    @Bean
+    public ExecutorService executorService() {
+        return Executors.newCachedThreadPool();
+    }
+
+    @Bean
+    public IntegrationFlow analyticsFlow(HttpclientGatewayProcessor processor) {
+        return f -> f.handle(m -> {
+            MessageHeaders messageHeaders = m.getHeaders();
+            String id = messageHeaders.get(CONTINUATION_ID_HEADER, String.class);
+            String httpRequestUrl = messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class);
+            String httpRequestMethod = messageHeaders.get(HTTP_REQUEST_METHOD_HEADER, String.class);
+            Object httpStatusCodeValue = messageHeaders.get(HTTP_STATUS_CODE_HEADER);
+
+            HttpStatus httpStatusCode = httpStatusCodeValue instanceof Integer ? HttpStatus.valueOf((Integer) httpStatusCodeValue) : (HttpStatus) httpStatusCodeValue;
+            MessageBuilder<?> messageBuilder = MessageBuilder
+                    .withPayload((httpStatusCode.is5xxServerError() || httpStatusCode.is4xxClientError()) ? m.getPayload() : EMPTY_BYTE_ARRAY)
+                    .setHeader("request_id", Objects.requireNonNull(id))
+                    .setHeader("url_requested", Objects.requireNonNull(httpRequestUrl))
+                    .setHeader("http_method", Objects.requireNonNull(httpRequestMethod))
+                    .setHeader("status_code", Objects.requireNonNull(httpStatusCode).value());
+            if (httpStatusCode.is5xxServerError() || httpStatusCode.is4xxClientError()) {
+                messageBuilder.setHeader("reason_phrase", httpStatusCode.getReasonPhrase());
+            }
+            processor.analytics().send(messageBuilder.build());
+        });
     }
 
     private boolean matchesUrlPatterns(String httpRequestUrl) {
@@ -294,44 +326,52 @@ public class HttpclientGatewayProcessorConfiguration {
         Set<Integer> retryStatusCodes = new HashSet<>(Arrays.asList(properties.getRetryErrorStatusCodes()));
         return IntegrationFlows.from(errorChannel)
                 .<MessageHandlingException>handle((p, h) -> {
+                    Message<?> failedMessage = p.getFailedMessage();
+                    MessageHeaders failedMessageHeaders = failedMessage.getHeaders();
                     Throwable t = p.getMostSpecificCause();
-                    String continuationId = p.getFailedMessage().getHeaders().get(CONTINUATION_ID_HEADER, String.class);
                     if (t instanceof WebClientResponseException) {
                         WebClientResponseException exception = (WebClientResponseException) p.getMostSpecificCause();
-                        int statusCode = exception.getRawStatusCode();
-                        String statusText = exception.getStatusText();
-                        if (retryStatusCodes.contains(statusCode)) {
-                            return MessageBuilder.fromMessage(p.getFailedMessage())
-                                    .setHeader(HTTP_STATUS_CODE_HEADER, statusCode)
-                                    .setHeader(HTTP_STATUS_TEXT_HEADER, statusText)
+                        HttpStatus statusCode = exception.getStatusCode();
+                        if (retryStatusCodes.contains(statusCode.value())) {
+                            return MessageBuilder.fromMessage(failedMessage)
+                                    .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
                                     .build();
                         } else {
                             HttpHeaders httpHeaders = exception.getHeaders();
                             byte[] body = exception.getResponseBodyAsByteArray();
                             return MessageBuilder.withPayload(body)
-                                    .setHeader(CONTINUATION_ID_HEADER, continuationId)
-                                    .setHeader(HTTP_STATUS_CODE_HEADER, statusCode)
                                     .copyHeaders(headerMapper.toHeaders(httpHeaders))
+                                    .copyHeaders(failedMessageHeaders)
+                                    .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
                                     .build();
                         }
                     } else {
                         return MessageBuilder.withPayload(p.getMostSpecificCause().getMessage())
-                                .setHeader(CONTINUATION_ID_HEADER, continuationId)
-                                .setHeader(HTTP_STATUS_CODE_HEADER, 502)
+                                .copyHeaders(failedMessageHeaders)
+                                .setHeader(HTTP_STATUS_CODE_HEADER, HttpStatus.BAD_GATEWAY.value())
                                 .build();
                     }
                 }).route(Message.class,
                         m -> retryStatusCodes.contains(m.getHeaders().get(HTTP_STATUS_CODE_HEADER, Integer.class)),
-                        m -> m.channelMapping(true, HttpclientGatewayProcessor.HTTP_ERROR_RESPONSE)
-                                .channelMapping(false, HttpclientGatewayProcessor.OUTPUT)).get();
+                        m -> m.subFlowMapping(true, retryFlow -> retryFlow.publishSubscribeChannel(executorService(),
+                                s -> s.subscribe(res -> res.channel(HttpclientGatewayProcessor.HTTP_ERROR_RESPONSE))
+                                        .subscribe(res -> res.channel(ANALYTICS_FLOW_INPUT))))
+                                .subFlowMapping(false, errorResponseFlow -> errorResponseFlow.publishSubscribeChannel(executorService(),
+                                        s -> s.subscribe(res -> res.channel(HttpclientGatewayProcessor.OUTPUT))
+                                                .subscribe(res -> res.channel(ANALYTICS_FLOW_INPUT))))).get();
     }
 
     public interface HttpclientGatewayProcessor extends Processor {
 
         String HTTP_ERROR_RESPONSE = "httpErrorResponse";
 
+        String ANALYTICS = "analytics";
+
         @Output(HTTP_ERROR_RESPONSE)
         MessageChannel httpErrorResponse();
+
+        @Output(ANALYTICS)
+        MessageChannel analytics();
     }
 }
 

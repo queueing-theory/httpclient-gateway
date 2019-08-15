@@ -16,6 +16,7 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
@@ -24,7 +25,6 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
-import org.springframework.util.MimeType;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -34,7 +34,9 @@ import static com.jayway.jsonpath.matchers.JsonPathMatchers.hasJsonPath;
 import static org.hamcrest.core.AllOf.allOf;
 import static org.hamcrest.core.Is.is;
 import static org.junit.Assert.assertThat;
+import static org.springframework.cloud.stream.test.matcher.MessageQueueMatcher.receivesMessageThat;
 import static org.springframework.cloud.stream.test.matcher.MessageQueueMatcher.receivesPayloadThat;
+import static org.springframework.integration.test.matcher.PayloadAndHeaderMatcher.sameExceptIgnorableHeaders;
 
 @RunWith(SpringRunner.class)
 @ContextConfiguration(initializers = HttpclientGatewayProcessorTests.Initializer.class)
@@ -56,11 +58,12 @@ public abstract class HttpclientGatewayProcessorTests {
     @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
             "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
             "httpclient-gateway.contentLengthToExternalize=1000000"})
-    public static class DefaultHttpclientGatewayProcessorTests extends HttpclientGatewayProcessorTests {
+    public static class HttpClientGatewayProcessor200ResponseTest extends HttpclientGatewayProcessorTests {
 
         @Test
-        public void testHttpClientGatewayProcessor() {
+        public void testHttpClientGatewayProcessor200Response() {
             Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "1234");
             map.put("http_requestMethod", "GET");
             map.put("http_requestUrl", "http://some.domain/get?foo=1&bar=2");
             MessageHeaders messageHeaders = new MessageHeaders(map);
@@ -74,25 +77,91 @@ public abstract class HttpclientGatewayProcessorTests {
                             hasJsonPath("$.args.foo", is("1")),
                             hasJsonPath("$.args.bar", is("2"))
                     )));
+            map = new HashMap<>();
+            map.put("request_id", "1234");
+            map.put("http_method", "GET");
+            map.put("status_code", 200);
+            messageHeaders = new MessageHeaders(map);
+            message = MessageBuilder.createMessage("", messageHeaders);
+
+            assertThat(messageCollector.forChannel(channels.analytics()),
+                    receivesMessageThat(sameExceptIgnorableHeaders(message,
+                            "url_requested", MessageHeaders.CONTENT_TYPE)
+                    ));
         }
+
+    }
+
+    @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
+            "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
+            "httpclient-gateway.contentLengthToExternalize=1000000"})
+    public static class HttpClientGatewayProcessor403ResponseTest extends HttpclientGatewayProcessorTests {
+
+        @Test
+        public void testHttpClientGatewayProcessor403Response() {
+            Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "5678");
+            map.put("http_requestMethod", "GET");
+            map.put("http_requestUrl", "http://some.domain/status/403");
+            MessageHeaders messageHeaders = new MessageHeaders(map);
+            Message message = MessageBuilder.createMessage(EMPTY_BYTE_ARRAY, messageHeaders);
+            channels.input().send(message);
+
+            map = new HashMap<>();
+            map.put("continuation_id", "5678");
+            map.put("http_requestMethod", "GET");
+            map.put("http_statusCode", HttpStatus.FORBIDDEN.value());
+            messageHeaders = new MessageHeaders(map);
+            message = MessageBuilder.createMessage("", messageHeaders);
+
+            assertThat(messageCollector.forChannel(channels.output()),
+                    receivesMessageThat(sameExceptIgnorableHeaders(message,
+                            "http_requestUrl",
+                            HttpHeaders.SERVER,
+                            HttpHeaders.CONTENT_LENGTH,
+                            HttpHeaders.DATE,
+                            MessageHeaders.CONTENT_TYPE)));
+
+
+            map = new HashMap<>();
+            map.put("request_id", "5678");
+            map.put("http_method", "GET");
+            map.put("status_code", 403);
+            map.put("reason_phrase", "Forbidden");
+            messageHeaders = new MessageHeaders(map);
+            message = MessageBuilder.createMessage("", messageHeaders);
+
+            assertThat(messageCollector.forChannel(channels.analytics()),
+                    receivesMessageThat(sameExceptIgnorableHeaders(message,
+                            "url_requested", MessageHeaders.CONTENT_TYPE)
+                    ));
+        }
+    }
+
+    @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
+            "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
+            "httpclient-gateway.contentLengthToExternalize=1000000"})
+    public static class DefaultHttpclientGatewayProcessorTests extends HttpclientGatewayProcessorTests {
+
 
         @Test
         public void testHttpStatus429() throws Exception {
             Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "1111");
             map.put("http_requestMethod", "GET");
             map.put("http_requestUrl", "http://some.domain/status/429");
             MessageHeaders messageHeaders = new MessageHeaders(map);
             Message message = MessageBuilder.createMessage(EMPTY_BYTE_ARRAY, messageHeaders);
             channels.input().send(message);
             Message<?> messageToRetry = messageCollector.forChannel(channels.httpErrorResponse()).take();
-            assertThat(messageToRetry.getHeaders().get("http_statusCode"), is(429));
-            assertThat(messageToRetry.getHeaders().get("http_statusText"), is("Too Many Requests"));
+            assertThat(messageToRetry.getHeaders().get("http_statusCode"), is(HttpStatus.TOO_MANY_REQUESTS.value()));
         }
 
         @Test
         public void testMultiPart() throws Exception {
             Map<String, Object> map = new HashMap<>();
             map.put(MessageHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON);
+            map.put("continuation_id", "2222");
             map.put("http_requestMethod", "POST");
             map.put("original_content_type", "multipart/form-data");
             map.put("http_requestUrl", "http://some.domain/post");
@@ -126,6 +195,7 @@ public abstract class HttpclientGatewayProcessorTests {
         @Test
         public void testResponseBodyExternalizedWhenURLPathMatches() throws Exception {
             Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "3333");
             map.put("http_requestMethod", "POST");
             map.put("http_requestUrl", "http://some.domain/post");
             MessageHeaders messageHeaders = new MessageHeaders(map);
@@ -147,6 +217,7 @@ public abstract class HttpclientGatewayProcessorTests {
         @Test
         public void testLargeResponseBodyExternalized() throws Exception {
             Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "4444");
             map.put("http_requestMethod", "POST");
             map.put("http_requestUrl", "http://some.domain/post");
             MessageHeaders messageHeaders = new MessageHeaders(map);
@@ -159,7 +230,6 @@ public abstract class HttpclientGatewayProcessorTests {
                     )));
         }
     }
-
 
     static class Initializer implements ApplicationContextInitializer<ConfigurableApplicationContext>,
             ApplicationListener<ContextClosedEvent> {
