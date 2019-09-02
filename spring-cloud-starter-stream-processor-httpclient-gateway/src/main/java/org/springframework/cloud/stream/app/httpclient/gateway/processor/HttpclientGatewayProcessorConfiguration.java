@@ -204,10 +204,12 @@ public class HttpclientGatewayProcessorConfiguration {
             String httpRequestUrl = messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class);
             String httpRequestMethod = messageHeaders.get(HTTP_REQUEST_METHOD_HEADER, String.class);
             Object httpStatusCodeValue = messageHeaders.get(HTTP_STATUS_CODE_HEADER);
+            Long date = messageHeaders.get("Date", Long.class);
 
             HttpStatus httpStatusCode = httpStatusCodeValue instanceof Integer ? HttpStatus.valueOf((Integer) httpStatusCodeValue) : (HttpStatus) httpStatusCodeValue;
             MessageBuilder<?> messageBuilder = MessageBuilder
                     .withPayload((httpStatusCode.is5xxServerError() || httpStatusCode.is4xxClientError()) ? m.getPayload() : EMPTY_BYTE_ARRAY)
+                    .setHeader("response_timestamp", date)
                     .setHeader("request_id", Objects.requireNonNull(id))
                     .setHeader("url_requested", Objects.requireNonNull(httpRequestUrl))
                     .setHeader("http_method", Objects.requireNonNull(httpRequestMethod))

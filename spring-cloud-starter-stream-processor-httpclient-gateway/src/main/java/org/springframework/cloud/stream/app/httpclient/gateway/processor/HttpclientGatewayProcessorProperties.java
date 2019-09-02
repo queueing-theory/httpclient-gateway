@@ -76,7 +76,7 @@ public class HttpclientGatewayProcessorProperties {
     /**
      * Base URI where externalized contents will be stored.
      */
-    private String resourceLocationUri = "file:///tmp";
+    private String resourceLocationUri = "file:///tmp/";
 
     /**
      * URL patterns to determine whether content downloaded from remote servers should be stored at resourceLocationUri

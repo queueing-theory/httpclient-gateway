@@ -86,7 +86,7 @@ public abstract class HttpclientGatewayProcessorTests {
 
             assertThat(messageCollector.forChannel(channels.analytics()),
                     receivesMessageThat(sameExceptIgnorableHeaders(message,
-                            "url_requested", MessageHeaders.CONTENT_TYPE)
+                            "url_requested", "response_timestamp",MessageHeaders.CONTENT_TYPE)
                     ));
         }
 
@@ -133,7 +133,7 @@ public abstract class HttpclientGatewayProcessorTests {
 
             assertThat(messageCollector.forChannel(channels.analytics()),
                     receivesMessageThat(sameExceptIgnorableHeaders(message,
-                            "url_requested", MessageHeaders.CONTENT_TYPE)
+                            "url_requested", "response_timestamp",MessageHeaders.CONTENT_TYPE)
                     ));
         }
     }
