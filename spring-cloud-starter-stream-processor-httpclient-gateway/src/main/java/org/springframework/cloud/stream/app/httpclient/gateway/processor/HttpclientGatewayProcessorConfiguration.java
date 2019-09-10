@@ -202,6 +202,10 @@ public class HttpclientGatewayProcessorConfiguration {
             MessageHeaders messageHeaders = m.getHeaders();
             String id = messageHeaders.get(CONTINUATION_ID_HEADER, String.class);
             String httpRequestUrl = messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class);
+            URI uri = URI.create(httpRequestUrl);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            String query =  uri.getQuery();
             String httpRequestMethod = messageHeaders.get(HTTP_REQUEST_METHOD_HEADER, String.class);
             Object httpStatusCodeValue = messageHeaders.get(HTTP_STATUS_CODE_HEADER);
             Long date = messageHeaders.get("Date", Long.class);
@@ -211,7 +215,9 @@ public class HttpclientGatewayProcessorConfiguration {
                     .withPayload((httpStatusCode.is5xxServerError() || httpStatusCode.is4xxClientError()) ? m.getPayload() : EMPTY_BYTE_ARRAY)
                     .setHeader("response_timestamp", date)
                     .setHeader("request_id", Objects.requireNonNull(id))
-                    .setHeader("url_requested", Objects.requireNonNull(httpRequestUrl))
+                    .setHeader("host", Objects.requireNonNull(host))
+                    .setHeader("path", Objects.requireNonNull(path))
+                    .setHeader("query", query)
                     .setHeader("http_method", Objects.requireNonNull(httpRequestMethod))
                     .setHeader("status_code", Objects.requireNonNull(httpStatusCode).value());
             if (httpStatusCode.is5xxServerError() || httpStatusCode.is4xxClientError()) {

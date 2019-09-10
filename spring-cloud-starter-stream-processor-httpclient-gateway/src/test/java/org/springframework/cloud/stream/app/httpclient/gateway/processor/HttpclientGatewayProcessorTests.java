@@ -81,12 +81,14 @@ public abstract class HttpclientGatewayProcessorTests {
             map.put("request_id", "1234");
             map.put("http_method", "GET");
             map.put("status_code", 200);
+            map.put("host", "127.0.0.1");
+            map.put("path", "/get");
+            map.put("query", "foo=1&bar=2");
             messageHeaders = new MessageHeaders(map);
             message = MessageBuilder.createMessage("", messageHeaders);
 
             assertThat(messageCollector.forChannel(channels.analytics()),
-                    receivesMessageThat(sameExceptIgnorableHeaders(message,
-                            "url_requested", "response_timestamp",MessageHeaders.CONTENT_TYPE)
+                    receivesMessageThat(sameExceptIgnorableHeaders(message,"response_timestamp", MessageHeaders.CONTENT_TYPE)
                     ));
         }
 
@@ -128,12 +130,13 @@ public abstract class HttpclientGatewayProcessorTests {
             map.put("http_method", "GET");
             map.put("status_code", 403);
             map.put("reason_phrase", "Forbidden");
+            map.put("host", "127.0.0.1");
+            map.put("path", "/status/403");
             messageHeaders = new MessageHeaders(map);
             message = MessageBuilder.createMessage("", messageHeaders);
 
             assertThat(messageCollector.forChannel(channels.analytics()),
-                    receivesMessageThat(sameExceptIgnorableHeaders(message,
-                            "url_requested", "response_timestamp",MessageHeaders.CONTENT_TYPE)
+                    receivesMessageThat(sameExceptIgnorableHeaders(message, "response_timestamp", MessageHeaders.CONTENT_TYPE)
                     ));
         }
     }
