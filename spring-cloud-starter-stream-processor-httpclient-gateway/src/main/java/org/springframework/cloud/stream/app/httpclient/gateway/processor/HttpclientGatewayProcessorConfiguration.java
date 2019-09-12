@@ -348,8 +348,8 @@ public class HttpclientGatewayProcessorConfiguration {
                             HttpHeaders httpHeaders = exception.getHeaders();
                             byte[] body = exception.getResponseBodyAsByteArray();
                             return MessageBuilder.withPayload(body)
-                                    .copyHeaders(headerMapper.toHeaders(httpHeaders))
                                     .copyHeaders(failedMessageHeaders)
+                                    .copyHeaders(headerMapper.toHeaders(httpHeaders))
                                     .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
                                     .build();
                         }
