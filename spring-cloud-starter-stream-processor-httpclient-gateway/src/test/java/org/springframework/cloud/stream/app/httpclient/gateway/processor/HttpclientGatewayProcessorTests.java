@@ -119,6 +119,7 @@ public abstract class HttpclientGatewayProcessorTests {
             assertThat(messageCollector.forChannel(channels.output()),
                     receivesMessageThat(sameExceptIgnorableHeaders(message,
                             "http_requestUrl",
+                            "error_response_time",
                             HttpHeaders.SERVER,
                             HttpHeaders.CONTENT_LENGTH,
                             HttpHeaders.DATE,

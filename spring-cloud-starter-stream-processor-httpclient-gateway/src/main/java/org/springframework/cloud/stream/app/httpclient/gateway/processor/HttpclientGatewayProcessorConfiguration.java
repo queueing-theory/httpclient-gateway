@@ -74,6 +74,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -101,6 +102,7 @@ public class HttpclientGatewayProcessorConfiguration {
     private static final String CONTINUATION_ID_HEADER = "continuation_id";
     private static final String ORIGINAL_CONTENT_TYPE = "original_content_type";
     private static final String ANALYTICS_FLOW_INPUT = "analyticsFlow.input";
+    private static final String ERROR_RESPONSE_TIME = "error_response_time";
     private static final Duration ONE_SECOND = Duration.ofSeconds(1);
     private static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
     private final Log logger = LogFactory.getLog(getClass());
@@ -205,10 +207,11 @@ public class HttpclientGatewayProcessorConfiguration {
             URI uri = URI.create(httpRequestUrl);
             String host = uri.getHost();
             String path = uri.getPath();
-            String query =  uri.getQuery();
+            String query = uri.getQuery();
             String httpRequestMethod = messageHeaders.get(HTTP_REQUEST_METHOD_HEADER, String.class);
             Object httpStatusCodeValue = messageHeaders.get(HTTP_STATUS_CODE_HEADER);
-            Long date = messageHeaders.get("Date", Long.class);
+            Long date = Optional.ofNullable(messageHeaders.get(ERROR_RESPONSE_TIME, Long.class))
+                    .orElseGet(() -> messageHeaders.get("Date", Long.class));
 
             HttpStatus httpStatusCode = httpStatusCodeValue instanceof Integer ? HttpStatus.valueOf((Integer) httpStatusCodeValue) : (HttpStatus) httpStatusCodeValue;
             MessageBuilder<?> messageBuilder = MessageBuilder
@@ -340,17 +343,20 @@ public class HttpclientGatewayProcessorConfiguration {
                     if (t instanceof WebClientResponseException) {
                         WebClientResponseException exception = (WebClientResponseException) p.getMostSpecificCause();
                         HttpStatus statusCode = exception.getStatusCode();
+                        HttpHeaders httpHeaders = exception.getHeaders();
                         if (retryStatusCodes.contains(statusCode.value())) {
-                            return MessageBuilder.fromMessage(failedMessage)
+                            return MessageBuilder.withPayload(failedMessage.getPayload())
+                                    .copyHeaders(failedMessageHeaders)
                                     .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
+                                    .setHeader(ERROR_RESPONSE_TIME, httpHeaders.getDate())
                                     .build();
                         } else {
-                            HttpHeaders httpHeaders = exception.getHeaders();
                             byte[] body = exception.getResponseBodyAsByteArray();
                             return MessageBuilder.withPayload(body)
                                     .copyHeaders(failedMessageHeaders)
                                     .copyHeaders(headerMapper.toHeaders(httpHeaders))
                                     .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
+                                    .setHeader(ERROR_RESPONSE_TIME, httpHeaders.getDate())
                                     .build();
                         }
                     } else {

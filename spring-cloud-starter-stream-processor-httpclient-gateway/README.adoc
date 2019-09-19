@@ -50,12 +50,12 @@ $ ./mvnw clean package
 
 ```
 java -jar httpclient-gateway-processor-kafka-2.1.0.RELEASE.jar \
-     --spring.cloud.stream.bindings.input.destination=output \
+     --spring.cloud.stream.bindings.input.destination=httpinput \
      --spring.cloud.stream.bindings.output.destination=input \
      --spring.cloud.stream.bindings.input.group=http-gateway \
      --logging.level.reactor.netty.http.client.HttpClient=DEBUG \
      --httpclient-gateway.wireTap=true \
-     --httpclient-gateway.url=https://news.yahoo.com \
+     --httpclient-gateway.url=https://ads.line.me
      --server.port=8081
 ```
 
