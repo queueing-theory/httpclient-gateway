@@ -208,7 +208,7 @@ public abstract class HttpclientGatewayProcessorTests {
             assertThat(messageCollector.forChannel(channels.output()),
                     receivesPayloadThat(
                             allOf(hasJsonPath("$.http_requestUrl"), hasJsonPath("$.original_content_type", is("application/json")),
-                                    hasJsonPath("$.uri", is("file://tmp/127.0.0.1/post/310140d2-8b58-32c2-b45f-01e5e14141d8.json")))));
+                                    hasJsonPath("$.uri", is("file://tmp/127.0.0.1/post/2be9bd7a-3434-3703-8ca2-7d1918de58bd.json")))));
 
         }
     }

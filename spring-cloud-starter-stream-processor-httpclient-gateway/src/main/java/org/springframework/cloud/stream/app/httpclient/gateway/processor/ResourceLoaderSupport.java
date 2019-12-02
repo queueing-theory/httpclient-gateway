@@ -47,14 +47,14 @@ class ResourceLoaderSupport {
         return Collections.unmodifiableMap(variables);
     }
 
-    public String externalizeAsResource(String name, MediaType mediaType, DataBuffer dataBuffer) throws IOException {
+    public String externalizeAsResource(String name, String continuationId, MediaType mediaType, DataBuffer dataBuffer) throws IOException {
         String extension = null;
         try {
             extension = mimeTypes.forName(mediaType.toString()).getExtension();
         } catch (MimeTypeException e) {
             e.printStackTrace();
         }
-        String key = name + "/" + UUID.nameUUIDFromBytes(name.getBytes()).toString();
+        String key = name + "/" + UUID.nameUUIDFromBytes(continuationId.getBytes()).toString();
 
         String uriPath = uriPath(key, extension);
         Resource resource = createResource(uriPath);

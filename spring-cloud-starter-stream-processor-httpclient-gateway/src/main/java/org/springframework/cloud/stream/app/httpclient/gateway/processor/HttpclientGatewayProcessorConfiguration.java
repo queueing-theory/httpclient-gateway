@@ -161,8 +161,9 @@ public class HttpclientGatewayProcessorConfiguration {
                                     MediaType mediaType = httpHeaders.getContentType();
                                     String uriPath = null;
                                     try {
+                                        String continuationId = messageHeaders.get(CONTINUATION_ID_HEADER, String.class);
                                         uriPath = resourceLoaderSupport()
-                                                .externalizeAsResource(uri.getHost() + uri.getPath(), mediaType, buffer);
+                                                .externalizeAsResource(uri.getHost() + uri.getPath(), continuationId, mediaType, buffer);
                                     } catch (IOException e) {
                                         e.printStackTrace();
                                     }
