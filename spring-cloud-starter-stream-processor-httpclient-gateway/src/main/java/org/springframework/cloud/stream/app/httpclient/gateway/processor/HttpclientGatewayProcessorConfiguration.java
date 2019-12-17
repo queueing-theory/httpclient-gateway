@@ -157,7 +157,8 @@ public class HttpclientGatewayProcessorConfiguration {
                                 URI uri = URI.create(messageHeaders.get(HTTP_REQUEST_URL_HEADER, String.class));
 
                                 if (matchesUrlPatterns(uri.getPath()) ||
-                                        contentLength > properties.getContentLengthToExternalize()) {
+                                        contentLength > properties.getContentLengthToExternalize() ||
+                                        buffer.readableByteCount() > properties.getContentLengthToExternalize()) {
                                     MediaType mediaType = httpHeaders.getContentType();
                                     String uriPath = null;
                                     try {
