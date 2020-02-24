@@ -252,9 +252,12 @@ public class HttpclientGatewayProcessorConfiguration {
 
     private IntegrationFlow multiPartBody(ResourceLoaderSupport resourceLoaderSupport) {
         return f -> f.convert(JsonNode.class)
-                .<ArrayNode, HttpEntity<?>>transform(p -> {
+                .transform(Message.class, m -> {
+                    ArrayNode p = (ArrayNode)m.getPayload();
                     HttpHeaders httpHeaders = new HttpHeaders();
+                    MessageHeaders h = m.getHeaders();
                     httpHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
+                    defaultHttpHeaderMapper().fromHeaders(h, httpHeaders);
                     MultiValueMap<String, Object> multipartRequest = new LinkedMultiValueMap<>();
                     p.forEach(jsonNode -> {
                         HttpHeaders nestedHeaders = new HttpHeaders();
@@ -274,6 +277,10 @@ public class HttpclientGatewayProcessorConfiguration {
                         } else {
                             String name = jsonNode.fieldNames().next();
                             JsonNode value = jsonNode.get(name);
+                            ContentDisposition contentDisposition = ContentDisposition
+                                    .builder("form-data")
+                                    .name(name).build();
+                            nestedHeaders.setContentDisposition(contentDisposition);
                             if (value.isObject() || value.isArray()) {
                                 nestedHeaders.setContentType(MediaType.APPLICATION_JSON);
                                 multipartRequest.add(name, new HttpEntity<>(value, nestedHeaders));
@@ -284,9 +291,8 @@ public class HttpclientGatewayProcessorConfiguration {
                             }
                         }
                     });
-                    return new HttpEntity<>(multipartRequest, httpHeaders);
-                }).enrichHeaders(
-                        h -> h.header(MessageHeaders.CONTENT_TYPE, MediaType.MULTIPART_FORM_DATA, true));
+                    return new HttpEntity(multipartRequest, httpHeaders);
+                });
     }
 
     private RateLimiterRequestHandlerAdvice rateLimiterRequestHandlerAdvice() {
@@ -309,6 +315,7 @@ public class HttpclientGatewayProcessorConfiguration {
                 DefaultHttpHeaderMapper.setupDefaultOutboundMapper(this);
                 setInboundHeaderNames(properties.getMappedResponseHeaders());
                 setOutboundHeaderNames(properties.getMappedRequestHeaders());
+                setExcludedOutboundStandardRequestHeaderNames(HttpHeaders.HOST, HttpHeaders.CONTENT_LENGTH);
             }
 
             protected Object getHttpHeader(HttpHeaders source, String name) {
