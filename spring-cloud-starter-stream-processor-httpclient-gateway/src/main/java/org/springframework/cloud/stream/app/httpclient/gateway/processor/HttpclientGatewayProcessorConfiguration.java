@@ -253,7 +253,7 @@ public class HttpclientGatewayProcessorConfiguration {
     private IntegrationFlow multiPartBody(ResourceLoaderSupport resourceLoaderSupport) {
         return f -> f.convert(JsonNode.class)
                 .transform(Message.class, m -> {
-                    ArrayNode p = (ArrayNode)m.getPayload();
+                    ArrayNode p = (ArrayNode) m.getPayload();
                     HttpHeaders httpHeaders = new HttpHeaders();
                     MessageHeaders h = m.getHeaders();
                     httpHeaders.setContentType(MediaType.MULTIPART_FORM_DATA);
@@ -353,7 +353,7 @@ public class HttpclientGatewayProcessorConfiguration {
                         WebClientResponseException exception = (WebClientResponseException) p.getMostSpecificCause();
                         HttpStatus statusCode = exception.getStatusCode();
                         HttpHeaders httpHeaders = exception.getHeaders();
-                        if (retryStatusCodes.contains(statusCode.value())) {
+                        if (retryStatusCodes.contains(statusCode.value()) && shouldRetry(failedMessage)) {
                             return MessageBuilder.withPayload(failedMessage.getPayload())
                                     .copyHeaders(failedMessageHeaders)
                                     .setHeader(HTTP_STATUS_CODE_HEADER, statusCode.value())
@@ -382,6 +382,19 @@ public class HttpclientGatewayProcessorConfiguration {
                                 .subFlowMapping(false, errorResponseFlow -> errorResponseFlow.publishSubscribeChannel(executorService(),
                                         s -> s.subscribe(res -> res.channel(HttpclientGatewayProcessor.OUTPUT))
                                                 .subscribe(res -> res.channel(ANALYTICS_FLOW_INPUT))))).get();
+    }
+
+    private boolean shouldRetry(Message<?> failedMessage) {
+        String httpRequestUrl = Objects.requireNonNull(failedMessage.getHeaders().get(HTTP_REQUEST_URL_HEADER, String.class));
+        String httpRequestMethod = failedMessage.getHeaders().get(HTTP_REQUEST_METHOD_HEADER, String.class);
+        if ("GET".equals(httpRequestMethod) || properties.getRetryUrlRegex() != null) {
+            for (String pattern : Objects.requireNonNull(properties.getRetryUrlRegex())) {
+                if (httpRequestUrl.matches(pattern)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public interface HttpclientGatewayProcessor extends Processor {

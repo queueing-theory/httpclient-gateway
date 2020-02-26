@@ -144,9 +144,10 @@ public abstract class HttpclientGatewayProcessorTests {
 
     @TestPropertySource(properties = {"httpclient-gateway.requestPerSecond=1",
             "httpclient-gateway.resourceLocationUri=file://tmp/{key}{extension}",
-            "httpclient-gateway.contentLengthToExternalize=1000000"})
+            "httpclient-gateway.contentLengthToExternalize=1000000",
+            "httpclient-gateway.retryErrorStatusCodes=429,500",
+            "httpclient-gateway.retryUrlRegex=^.+\\/500$"})
     public static class DefaultHttpclientGatewayProcessorTests extends HttpclientGatewayProcessorTests {
-
 
         @Test
         public void testHttpStatus429() throws Exception {
@@ -159,6 +160,19 @@ public abstract class HttpclientGatewayProcessorTests {
             channels.input().send(message);
             Message<?> messageToRetry = messageCollector.forChannel(channels.httpErrorResponse()).take();
             assertThat(messageToRetry.getHeaders().get("http_statusCode"), is(HttpStatus.TOO_MANY_REQUESTS.value()));
+        }
+
+        @Test
+        public void testHttpStatus500() throws Exception {
+            Map<String, Object> map = new HashMap<>();
+            map.put("continuation_id", "1111");
+            map.put("http_requestMethod", "POST");
+            map.put("http_requestUrl", "http://some.domain/status/500");
+            MessageHeaders messageHeaders = new MessageHeaders(map);
+            Message message = MessageBuilder.createMessage(EMPTY_BYTE_ARRAY, messageHeaders);
+            channels.input().send(message);
+            Message<?> messageToRetry = messageCollector.forChannel(channels.httpErrorResponse()).take();
+            assertThat(messageToRetry.getHeaders().get("http_statusCode"), is(HttpStatus.INTERNAL_SERVER_ERROR.value()));
         }
 
         @Test

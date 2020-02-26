@@ -7,6 +7,10 @@ import org.springframework.expression.common.LiteralExpression;
 import org.springframework.integration.http.support.DefaultHttpHeaderMapper;
 import org.springframework.validation.annotation.Validated;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Configuration properties for the Http Client Processor module.
  *
@@ -39,6 +43,11 @@ public class HttpclientGatewayProcessorProperties {
      * HTTP Status Codes to retry
      */
     private Integer[] retryErrorStatusCodes = {429};
+
+    /**
+     * Regex to match against the URL strings for which the requests attempts have been failed and retry should be performed
+     */
+    private String[] retryUrlRegex;
 
     /**
      * Delay before HTTP requests are actually sent. Works as preemptive rate limit.
@@ -180,5 +189,13 @@ public class HttpclientGatewayProcessorProperties {
 
     public void setUrlPatternsToExternalize(String[] urlPatternsToExternalize) {
         this.urlPatternsToExternalize = urlPatternsToExternalize;
+    }
+
+    public String[] getRetryUrlRegex() {
+        return retryUrlRegex;
+    }
+
+    public void setRetryUrlRegex(String[] retryUrlRegex) {
+        this.retryUrlRegex = retryUrlRegex;
     }
 }
